@@ -118,7 +118,7 @@ export function EnhancedSaveModal({
       const description = formData.description || "";
 
       // Determine if this is an update or a new document
-      const isUpdate = document?.id && !document?.isNewDocument;
+      const isUpdate = true;
       const documentId = document?.id || document?._id || "";
 
       // Validate documentId for updates

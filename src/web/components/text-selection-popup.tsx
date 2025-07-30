@@ -8,7 +8,7 @@ interface TextSelectionPopupProps {
   isVisible: boolean;
   position: { x: number; y: number };
   selectedText: string;
-  onFixWithAI: (text: string) => void;
+  onOpenCopilot: (text: string, action: "fix" | "explain" | "rewrite") => void;
   onClose: () => void;
 }
 
@@ -16,7 +16,7 @@ export function TextSelectionPopup({
   isVisible,
   position,
   selectedText,
-  onFixWithAI,
+  onOpenCopilot,
   onClose,
 }: TextSelectionPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
@@ -99,7 +99,7 @@ export function TextSelectionPopup({
           variant="ghost"
           size="sm"
           className="w-full justify-start h-auto p-2 hover:bg-blue-100 rounded-lg transition"
-          onClick={() => onFixWithAI(selectedText)}
+          onClick={() => onOpenCopilot(selectedText, "fix")}
         >
           <Lightbulb className="h-4 w-4 mr-2 text-yellow-500" />
           <div className="text-left">
@@ -114,7 +114,7 @@ export function TextSelectionPopup({
           variant="ghost"
           size="sm"
           className="w-full justify-start h-auto p-2 hover:bg-blue-100 rounded-lg transition"
-          onClick={() => onFixWithAI(`Explain this: ${selectedText}`)}
+          onClick={() => onOpenCopilot(selectedText, "explain")}
         >
           <MessageSquare className="h-4 w-4 mr-2 text-blue-500" />
           <div className="text-left">
@@ -131,9 +131,7 @@ export function TextSelectionPopup({
           variant="ghost"
           size="sm"
           className="w-full justify-start h-auto p-2 hover:bg-blue-100 rounded-lg transition"
-          onClick={() =>
-            onFixWithAI(`Rewrite this professionally: ${selectedText}`)
-          }
+          onClick={() => onOpenCopilot(selectedText, "rewrite")}
         >
           <Wand2 className="h-4 w-4 mr-2 text-purple-500" />
           <div className="text-left">
