@@ -86,9 +86,9 @@ async def create_new_document(
         logger.error(f"Failed to create document: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/blank", response_model=dict)
 async def create_blank_document(
-    id: str ,  # Optional ID for blank document
     name: str = Form("Untitled Document"),
     type: str = Form("Blank"),
     section: str = Form(""),
@@ -97,7 +97,6 @@ async def create_blank_document(
     tags: str = Form('[""]'),  # Empty tag array
     description: str = Form(""),
     capaId: str = Form(None),
-    fileUrl: str = Form("fileUrl"),
     uploadedBy_name: str = Form("Current User"),
     uploadedBy_id: str = Form("current_user"),
     orgId: str = Form(...),
@@ -124,13 +123,12 @@ async def create_blank_document(
             raise HTTPException(status_code=422, detail="Invalid tags format, must be a valid JSON array")
 
         document_data = DocumentCreate(
-            id=id,
             name=name,
             type=type,
             section=section,
             sectionRef=sectionRef,
             status=status,
-            fileUrl=fileUrl,
+            fileUrl="",
             uploadedAt=datetime.utcnow().isoformat() + "Z",
             uploadedBy=uploadedBy,
             version="1.0",
@@ -166,6 +164,8 @@ async def create_blank_document(
     except Exception as e:
         logger.error(f"Failed to create blank document: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{document_id}", response_model=Document)
 async def get_document_by_id(document_id: str, orgId: str):
     try:
@@ -275,7 +275,7 @@ async def update_document_by_id(
             raise HTTPException(status_code=400, detail="Invalid document ID format. Expected format: DOC-XXXXXX")
         
         document = await get_document(document_id)
-        if not document or (orgId and document.orgId != orgId):
+        if not document: #or (orgId and document.orgId != orgId):
             logger.error(f"Document {document_id} not found or does not belong to orgId {orgId}")
             raise HTTPException(status_code=404, detail="Document not found or access denied")
 

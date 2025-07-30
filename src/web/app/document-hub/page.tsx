@@ -486,7 +486,7 @@ export default function DocumentHubPage() {
       );
       formData.append("content", content);
       const currentVersion =
-        parseFloat(selectedDocument.version || "1.0") + 0.1;
+        parseFloat(selectedDocument.version.replaceAll("v", "") || "1.0") + 0.1;
       formData.append("version", currentVersion.toFixed(1));
       console.log("Reupload FormData:", {
         ...Object.fromEntries(formData),

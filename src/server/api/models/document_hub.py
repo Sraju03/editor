@@ -22,7 +22,7 @@ class VersionHistory(BaseModel):
     uploadedBy: UploadedByVersionHistory
 
 class Document(BaseModel):
-    id: str
+    id: str = Field(..., alias="_id")
     name: str
     type: str
     section: str
@@ -105,7 +105,6 @@ class DocumentSearchResponse(BaseModel):
         populate_by_name = True
 
 class DocumentBase(BaseModel):
-    id:str=""
     name: str
     type: str
     section: str
@@ -116,7 +115,7 @@ class DocumentBase(BaseModel):
     version: str = "1.0"
     uploadedBy: UploadedBy
     uploadedAt: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
-    fileUrl: Optional[str] = None
+    fileUrl: str
     sectionRef: str
     versionHistory: Optional[List[VersionHistory]] = None
     fileSize: Optional[str] = None

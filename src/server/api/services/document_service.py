@@ -6,6 +6,7 @@ import logging
 import uuid
 import os
 import re
+from bson import ObjectId
 from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
@@ -92,8 +93,8 @@ async def get_next_document_id() -> str:
         raise
 
 async def create_document(document: DocumentCreate, file: Optional[UploadFile] = None) -> Document:
-    logger.info(f"Creating or updating document with data: {document.dict()}")
-
+    logger.info(f"Creating document with data: {document.dict()}")
+    
     if not document.name:
         logger.error("Validation failed: Document name is required")
         raise ValueError("Document name is required")
@@ -104,95 +105,53 @@ async def create_document(document: DocumentCreate, file: Optional[UploadFile] =
         logger.error("Validation failed: Section is required")
         raise ValueError("Section is required")
 
-    document_id = document.id or await get_next_document_id()
+    document_id = await get_next_document_id()
     current_time = datetime.utcnow().isoformat() + "Z"
 
-    # Clean/prepare document base data
     document_data = document.dict(exclude_unset=True)
     document_data.update({
         "_id": document_id,
+        "uploadedAt": current_time,
         "last_updated": current_time,
         "version": document.version or "1.0",
+        "versionHistory": [],
         "tags": document.tags or [],
         "description": clean_description(document.description, document.name) if document.description else None,
         "is_deleted": False
     })
 
-    # Check if document already exists
-    existing = await db.find_one({"_id": document_id})
-
-    file_url, file_size_str = None, None
-    version_entry = None
-
     if file:
-        file_url = await upload_to_storage(file)
-        file_size_str = f"{file.size / 1024 / 1024:.1f} MB" if file.size else None
+        document_data["fileUrl"] = await upload_to_storage(file)
+        document_data["fileSize"] = f"{file.size / 1024 / 1024:.1f} MB" if file.size else None
+        document_data["versionHistory"] = [
+            VersionHistory(
+                version=document_data["version"],
+                fileUrl=document_data["fileUrl"],
+                uploadedAt=document_data["uploadedAt"],
+                fileSize=document_data["fileSize"],
+                uploadedBy=UploadedByVersionHistory(
+                    id=document.uploadedBy.id,
+                    name=document.uploadedBy.name,
+                    orgId=document.uploadedBy.orgId
+                )
+            ).dict()
+        ]
 
-        version_entry = VersionHistory(
-            version=document_data["version"],
-            fileUrl=file_url,
-            uploadedAt=current_time,
-            fileSize=file_size_str,
-            uploadedBy=UploadedByVersionHistory(
-                id=document.uploadedBy.id,
-                name=document.uploadedBy.name,
-                orgId=document.uploadedBy.orgId
-            )
-        ).dict()
+    if "id" in document_data:
+        del document_data["id"]
 
-    if existing:
-        # Document exists: update versionHistory and optional fields
-        update_set_fields = {
-    "last_updated": current_time,
-    "version": document_data["version"]
-}
-        if file_url:
-            update_set_fields["fileUrl"] = file_url
-            update_set_fields["fileSize"] = file_size_str
-        logger.info(file_url)
-        update_ops = {
-            "$set": update_set_fields
-        }
+    try:
+        result = await db.insert_one(document_data)
+        if not result.inserted_id:
+            logger.error("Failed to insert document into database")
+            raise ValueError("Failed to save document to database")
+        logger.info(f"Document inserted successfully with ID: {result.inserted_id}")
+    except Exception as e:
+        logger.error(f"Database insertion failed: {str(e)}")
+        raise
 
-        if version_entry:
-            update_ops["$push"] = {"versionHistory": version_entry}
-
-        try:
-            await db.update_one({"_id": document_id}, update_ops)
-            logger.info(f"Updated existing document ID: {document_id} with new version")
-        except Exception as e:
-            logger.error(f"Failed to update document: {str(e)}")
-            raise
-        logger.info(f"update set of fields: %s", existing)
-        
-        existing.update(update_set_fields)
-        existing["id"] = document_id
-        return Document(**existing)
-
-    else:
-        # New document: insert with versionHistory
-        document_data.update({
-            "uploadedAt": current_time,
-            "fileUrl": file_url,
-            "fileSize": file_size_str,
-            "versionHistory": [version_entry] if version_entry else []
-        })
-
-        if "id" in document_data:
-            del document_data["id"]
-
-        try:
-            result = await db.insert_one(document_data)
-            if not result.inserted_id:
-                logger.error("Failed to insert document into database")
-                raise ValueError("Failed to save document to database")
-            logger.info(f"Document inserted successfully with ID: {result.inserted_id}")
-        except Exception as e:
-            logger.error(f"Database insertion failed: {str(e)}")
-            raise
-
-        document_data["id"] = document_id
-        return Document(**document_data)
+    document_data["id"] = document_id
+    return Document(**document_data)
 
 async def get_document(document_id: str) -> Optional[Document]:
     logger.info(f"Fetching document with ID: {document_id}")
@@ -207,6 +166,8 @@ async def get_document(document_id: str) -> Optional[Document]:
     except Exception as e:
         logger.error(f"Error fetching document {document_id}: {str(e)}")
         raise
+
+
 
 async def get_all_documents(query: Dict = None) -> List[Document]:
     logger.info(f"Fetching all documents with query: {query}")
@@ -252,7 +213,8 @@ async def update_document(document_id: str, update_data: Dict, file: Optional[Up
             return None
 
         update_dict = {k: v for k, v in update_data.items() if v is not None}
-        
+
+        # Handle last_updated
         provided_last_updated = update_data.get("last_updated")
         logger.info(f"Received last_updated: {provided_last_updated}")
         if provided_last_updated:
@@ -267,39 +229,56 @@ async def update_document(document_id: str, update_data: Dict, file: Optional[Up
             logger.warning("No last_updated provided, using current time")
             update_dict["last_updated"] = datetime.utcnow().isoformat() + "Z"
 
+        # Preserve existing uploadedBy if not overridden
         if "uploadedBy" not in update_dict and document.uploadedBy:
             update_dict["uploadedBy"] = document.uploadedBy.dict()
             logger.info(f"Preserving existing uploadedBy: {update_dict['uploadedBy']}")
 
+        version_history_entry = None
+
+        # Handle file upload and versioning
         if file:
             update_dict["fileUrl"] = await upload_to_storage(file)
             update_dict["fileSize"] = f"{file.size / 1024 / 1024:.1f} MB" if file.size else None
-            current_version = float(document.version) if document.version else 1.0
-            update_dict["version"] = f"{current_version + 0.1:.1f}"
-            version_history = [VersionHistory(**item) for item in update_dict.get("versionHistory", document.versionHistory or [])]
-            unique_versions = {(vh.version, vh.fileUrl, vh.uploadedAt) for vh in version_history}
-            version_history = [vh for vh in version_history if (vh.version, vh.fileUrl, vh.uploadedAt) in unique_versions]
-            current_version_tuple = (document.version, document.fileUrl, document.uploadedAt)
-            if current_version_tuple not in unique_versions:
-                version_history.append(VersionHistory(
-                    version=document.version,
-                    fileUrl=document.fileUrl,
-                    uploadedAt=document.uploadedAt,
-                    fileSize=document.fileSize,
-                    uploadedBy=UploadedByVersionHistory(
-                        id=document.uploadedBy.id,
-                        name=document.uploadedBy.name,
-                        orgId=document.uploadedBy.orgId
-                    )
-                ))
-            update_dict["versionHistory"] = [vh.dict() for vh in version_history]
+# Safely clean and convert version
+            raw_version = document.version or "1.0"
+            cleaned_version = raw_version.replace("V", "").replace("v", "").strip()
 
+            try:
+                current_version = float(cleaned_version)
+            except ValueError:
+                current_version = 1.0
+
+            new_version = round(current_version + 0.1, 1)
+            update_dict["version"] = f"{new_version:.1f}"
+
+
+            # Prepare the previous version entry
+            version_history_entry = VersionHistory(
+                version=document.version,
+                fileUrl=document.fileUrl,
+                uploadedAt=document.uploadedAt,
+                fileSize=document.fileSize,
+                uploadedBy=UploadedByVersionHistory(
+                    id=document.uploadedBy.id,
+                    name=document.uploadedBy.name,
+                    orgId=document.uploadedBy.orgId
+                )
+            ).dict()
+
+        # Clean description if present
         if "description" in update_dict and update_dict["description"]:
             update_dict["description"] = clean_description(update_dict["description"], update_data.get("name", document.name))
 
+        # Always ensure is_deleted is set
         update_dict["is_deleted"] = update_dict.get("is_deleted", False)
 
-        result = await db.update_one({"_id": document_id}, {"$set": update_dict})
+        # Perform update with optional version push
+        update_ops = {"$set": update_dict}
+        if version_history_entry:
+            update_ops["$push"] = {"versionHistory": version_history_entry}
+
+        result = await db.update_one({"_id": document_id}, update_ops)
         if result.matched_count == 0:
             logger.error(f"No document found with ID {document_id}")
             return None
@@ -310,10 +289,12 @@ async def update_document(document_id: str, update_data: Dict, file: Optional[Up
         updated_document = await get_document(document_id)
         logger.info(f"Updated document {document_id} successfully, last_updated: {updated_document.last_updated}, uploadedBy: {updated_document.uploadedBy}")
         return updated_document
+
     except Exception as e:
         logger.error(f"Error updating document {document_id}: {str(e)}")
         raise
-        
+
+
 async def delete_document(document_id: str, version_history: Optional[List[VersionHistory]] = None) -> bool:
     logger.info(f"Soft deleting document with ID: {document_id}")
     try:
