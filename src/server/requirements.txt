@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+fastapi-cache2
+sentence_transformers
+dotenv
+aiohttp
+motor
+pymongo
+langchain_core
+langchain_groq
+pydantic[email]
+PyPDF2
+python-multipart
+mammoth
+fuzzywuzzy
+pdfplumber
+einops
